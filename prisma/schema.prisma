@@ -1,0 +1,390 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ----------------------------------------------------
+// ENUMS
+// ----------------------------------------------------
+
+enum ApplicationStatus {
+  DRAFT
+  ACTIVE
+  MAINTENANCE
+  DEPRECATED
+  ARCHIVED
+}
+
+enum ApplicationType {
+  DESKTOP
+  WEB
+  HYBRID
+  CLI
+}
+
+enum OperatingSystem {
+  WINDOWS
+  MACOS
+  LINUX
+}
+
+enum CpuArchitecture {
+  X86_64
+  ARM64
+  UNIVERSAL
+}
+
+enum PackageFormat {
+  EXE
+  MSI
+  DMG
+  PKG
+  APPIMAGE
+  DEB
+  RPM
+  TAR_GZ
+  ZIP
+}
+
+enum ReleaseStatus {
+  DISCOVERED
+  VALIDATING
+  VALIDATED
+  REJECTED
+  APPROVED
+  PUBLISHED
+  REVOKED
+}
+
+enum AssetVerificationStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+enum WebhookStatus {
+  RECEIVED
+  PROCESSING
+  PROCESSED
+  IGNORED
+  FAILED
+}
+
+enum NotificationChannel {
+  SSE_HUB
+  SSE_ADMIN
+  EMAIL
+  WEBHOOK_OUTBOUND
+}
+
+// ----------------------------------------------------
+// IDENTITY & ACCESS CONTROL
+// ----------------------------------------------------
+
+model AdminUser {
+  id                  String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email               String              @unique @db.VarChar(255)
+  passwordHash        String              @map("password_hash") @db.VarChar(255)
+  fullName            String              @map("full_name") @db.VarChar(150)
+  roleId              String              @map("role_id") @db.Uuid
+  role                Role                @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  isActive            Boolean             @default(true) @map("is_active")
+  mfaSecret           String?             @map("mfa_secret") @db.VarChar(255)
+  mfaEnabled          Boolean             @default(false) @map("mfa_enabled")
+  mfaRecoveryCodes    String[]            @default([]) @map("mfa_recovery_codes")
+  refreshTokenHash    String?             @map("refresh_token_hash") @db.VarChar(255)
+  lastLoginAt         DateTime?           @map("last_login_at") @db.Timestamptz
+  failedLoginAttempts Int                 @default(0) @map("failed_login_attempts")
+  lockedUntil         DateTime?           @map("locked_until") @db.Timestamptz
+  createdAt           DateTime            @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt           DateTime            @updatedAt @map("updated_at") @db.Timestamptz
+  deletedAt           DateTime?           @map("deleted_at") @db.Timestamptz
+
+  auditLogs           AuditLog[]
+  catalogRevisions    CatalogueRevision[]
+
+  @@map("admin_users")
+  @@index([roleId])
+}
+
+model Role {
+  id          String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name        String           @unique @db.VarChar(50)
+  description String?          @db.Text
+  isSystem    Boolean          @default(false) @map("is_system")
+  createdAt   DateTime         @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime         @updatedAt @map("updated_at") @db.Timestamptz
+  deletedAt   DateTime?        @map("deleted_at") @db.Timestamptz
+
+  users       AdminUser[]
+  permissions RolePermission[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id          String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code        String           @unique @db.VarChar(80)
+  category    String           @db.VarChar(50)
+  description String?          @db.Text
+
+  roles       RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       String     @map("role_id") @db.Uuid
+  permissionId String     @map("permission_id") @db.Uuid
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+model AuditLog {
+  id          String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  adminUserId String?    @map("admin_user_id") @db.Uuid
+  adminUser   AdminUser? @relation(fields: [adminUserId], references: [id], onDelete: SetNull)
+  actorEmail  String     @map("actor_email") @db.VarChar(255)
+  ipAddress   String     @map("ip_address") @db.VarChar(45)
+  userAgent   String?    @map("user_agent") @db.Text
+  action      String     @db.VarChar(100)
+  entityType  String     @map("entity_type") @db.VarChar(60)
+  entityId    String     @map("entity_id") @db.VarChar(64)
+  payload     Json       @db.JsonB
+  createdAt   DateTime   @default(now()) @map("created_at") @db.Timestamptz
+
+  @@map("audit_logs")
+  @@index([entityType, entityId])
+  @@index([createdAt(sort: Desc)])
+  @@index([adminUserId, createdAt(sort: Desc)])
+}
+
+// ----------------------------------------------------
+// APPLICATION & REPOSITORY CONNECTIONS
+// ----------------------------------------------------
+
+model Application {
+  id              String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  slug            String                  @unique @db.VarChar(64)
+  displayName     String                  @map("display_name") @db.VarChar(120)
+  summary         String                  @db.VarChar(255)
+  description     String                  @db.Text
+  category        String                  @db.VarChar(50)
+  developer       String                  @default("HENU OS PRIVATE LIMITED") @db.VarChar(120)
+  iconUrl         String                  @map("icon_url") @db.VarChar(512)
+  bannerUrl       String?                 @map("banner_url") @db.VarChar(512)
+  homepageUrl     String?                 @map("homepage_url") @db.VarChar(512)
+  docsUrl         String?                 @map("docs_url") @db.VarChar(512)
+  license         String                  @default("Proprietary") @db.VarChar(60)
+  status          ApplicationStatus       @default(DRAFT)
+  appType         ApplicationType         @default(DESKTOP) @map("app_type")
+  minHubVersion   String?                 @map("min_hub_version") @db.VarChar(30)
+  webAppUrl       String?                 @map("web_app_url") @db.VarChar(512)
+  dependencies    Json?                   @db.JsonB
+  featured        Boolean                 @default(false)
+  sortOrder       Int                     @default(0) @map("sort_order")
+  createdAt       DateTime                @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime                @updatedAt @map("updated_at") @db.Timestamptz
+  deletedAt       DateTime?               @map("deleted_at") @db.Timestamptz
+
+  connections     RepositoryConnection[]
+  compatibilities PlatformCompatibility[]
+  releases        Release[]
+  notifications   NotificationPolicy[]
+
+  @@map("applications")
+  @@index([slug])
+  @@index([status])
+  @@index([category])
+}
+
+model RepositoryConnection {
+  id                   String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  applicationId        String        @map("application_id") @db.Uuid
+  application          Application   @relation(fields: [applicationId], references: [id], onDelete: Restrict)
+  provider             String        @default("GITHUB") @db.VarChar(30)
+  repoOwner            String        @map("repo_owner") @db.VarChar(100)
+  repoName             String        @map("repo_name") @db.VarChar(100)
+  githubInstallationId BigInt        @map("github_installation_id")
+  targetBranch         String        @default("main") @map("target_branch") @db.VarChar(100)
+  assetPattern         String        @map("asset_pattern") @db.VarChar(255)
+  tagPattern           String        @default("^v?[0-9]+\\.[0-9]+\\.[0-9]+") @map("tag_pattern") @db.VarChar(255)
+  autoIngestReleases   Boolean       @default(true) @map("auto_ingest_releases")
+  autoPublishChannels  String[]      @default([]) @map("auto_publish_channels")
+  isActive             Boolean       @default(true) @map("is_active")
+  lastSyncAt           DateTime?     @map("last_sync_at") @db.Timestamptz
+  createdAt            DateTime      @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt            DateTime      @updatedAt @map("updated_at") @db.Timestamptz
+  deletedAt            DateTime?     @map("deleted_at") @db.Timestamptz
+
+  releases             Release[]
+  webhookEvents        WebhookEvent[]
+
+  @@unique([repoOwner, repoName])
+  @@map("repository_connections")
+  @@index([applicationId])
+  @@index([repoOwner, repoName, isActive])
+}
+
+// ----------------------------------------------------
+// RELEASES, ASSETS & COMPATIBILITY
+// ----------------------------------------------------
+
+model ReleaseChannel {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name           String    @unique @db.VarChar(40)
+  description    String?   @db.Text
+  autoPromoteRule Json?    @map("auto_promote_rule") @db.JsonB
+  isDefault      Boolean   @default(false) @map("is_default")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  releases       Release[]
+
+  @@map("release_channels")
+}
+
+model PlatformCompatibility {
+  id                    String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  applicationId         String          @map("application_id") @db.Uuid
+  application           Application     @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  os                    OperatingSystem
+  arch                  CpuArchitecture
+  packageFormat         PackageFormat   @map("package_format")
+  minOsVersion          String?         @map("min_os_version") @db.VarChar(30)
+  maxOsVersion          String?         @map("max_os_version") @db.VarChar(30)
+  launchExecutableName  String?         @map("launch_executable_name") @db.VarChar(120)
+  installInstructions  String?         @map("install_instructions") @db.Text
+  isSupported           Boolean         @default(true) @map("is_supported")
+  createdAt             DateTime        @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt             DateTime        @updatedAt @map("updated_at") @db.Timestamptz
+
+  assets                ReleaseAsset[]
+
+  @@unique([applicationId, os, arch, packageFormat])
+  @@map("platform_compatibilities")
+  @@index([applicationId, isSupported])
+}
+
+model Release {
+  id                     String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  applicationId          String               @map("application_id") @db.Uuid
+  application            Application          @relation(fields: [applicationId], references: [id], onDelete: Restrict)
+  repositoryConnectionId String               @map("repository_connection_id") @db.Uuid
+  repositoryConnection   RepositoryConnection @relation(fields: [repositoryConnectionId], references: [id], onDelete: Restrict)
+  channelId              String               @map("channel_id") @db.Uuid
+  channel                ReleaseChannel       @relation(fields: [channelId], references: [id], onDelete: Restrict)
+  version                String               @db.VarChar(50)
+  semverMajor            Int                  @map("semver_major")
+  semverMinor            Int                  @map("semver_minor")
+  semverPatch            Int                  @map("semver_patch")
+  semverPrerelease       String?              @map("semver_prerelease") @db.VarChar(50)
+  tagName                String               @map("tag_name") @db.VarChar(100)
+  gitCommitSha           String               @map("git_commit_sha") @db.VarChar(40)
+  title                  String               @db.VarChar(255)
+  changelog              String               @db.Text
+  githubReleaseId        BigInt               @unique @map("github_release_id")
+  githubPublishedAt      DateTime             @map("github_published_at") @db.Timestamptz
+  isPrerelease           Boolean              @default(false) @map("is_prerelease")
+  status                 ReleaseStatus        @default(DISCOVERED)
+  publishedAt            DateTime?            @map("published_at") @db.Timestamptz
+  rejectionReason        String?              @map("rejection_reason") @db.Text
+  provenancePayload      Json?                @map("provenance_payload") @db.JsonB
+  revocationReason       String?              @map("revocation_reason") @db.Text
+  createdAt              DateTime             @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt              DateTime             @updatedAt @map("updated_at") @db.Timestamptz
+
+  assets                 ReleaseAsset[]
+
+  @@unique([applicationId, channelId, version])
+  @@map("releases")
+  @@index([applicationId, channelId, status])
+  @@index([applicationId, semverMajor(sort: Desc), semverMinor(sort: Desc), semverPatch(sort: Desc)])
+}
+
+model ReleaseAsset {
+  id                      String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  releaseId               String                  @map("release_id") @db.Uuid
+  release                 Release                 @relation(fields: [releaseId], references: [id], onDelete: Cascade)
+  platformCompatibilityId String?                 @map("platform_compatibility_id") @db.Uuid
+  platformCompatibility   PlatformCompatibility?  @relation(fields: [platformCompatibilityId], references: [id], onDelete: Restrict)
+  githubAssetId           BigInt                  @unique @map("github_asset_id")
+  fileName                String                  @map("file_name") @db.VarChar(255)
+  downloadUrl             String                  @map("download_url") @db.VarChar(1024)
+  sizeBytes               BigInt                  @map("size_bytes")
+  contentType             String                  @map("content_type") @db.VarChar(120)
+  sha256                  String                  @db.VarChar(64)
+  signatureUrl            String?                 @map("signature_url") @db.VarChar(1024)
+  signatureType           String?                 @map("signature_type") @db.VarChar(50)
+  isSignatureVerified     Boolean                 @default(false) @map("is_signature_verified")
+  isInstallable           Boolean                 @default(false) @map("is_installable")
+  verificationStatus      AssetVerificationStatus @default(PENDING) @map("verification_status")
+  verificationError       String?                 @map("verification_error") @db.Text
+  createdAt               DateTime                @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt               DateTime                @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@map("release_assets")
+  @@index([releaseId, isInstallable])
+}
+
+// ----------------------------------------------------
+// CATALOGUE, INGRESS & POLICIES
+// ----------------------------------------------------
+
+model CatalogueRevision {
+  id                 String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  revisionNumber     Int        @unique @map("revision_number")
+  publishedByAdminId String?    @map("published_by_admin_id") @db.Uuid
+  publishedBy        AdminUser? @relation(fields: [publishedByAdminId], references: [id], onDelete: SetNull)
+  contentHash        String     @map("content_hash") @db.VarChar(64)
+  manifestPayload    Json       @map("manifest_payload") @db.JsonB
+  applicationCount   Int        @map("application_count")
+  releaseCount       Int        @map("release_count")
+  summary            String     @db.VarChar(255)
+  isActive           Boolean    @default(true) @map("is_active")
+  publishedAt        DateTime   @default(now()) @map("published_at") @db.Timestamptz
+
+  @@map("catalogue_revisions")
+  @@index([isActive])
+  @@index([revisionNumber(sort: Desc)])
+}
+
+model WebhookEvent {
+  id                     String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  deliveryId             String                @unique @map("delivery_id") @db.VarChar(64)
+  eventType              String                @map("event_type") @db.VarChar(60)
+  repositoryConnectionId String?               @map("repository_connection_id") @db.Uuid
+  repositoryConnection   RepositoryConnection? @relation(fields: [repositoryConnectionId], references: [id], onDelete: SetNull)
+  status                 WebhookStatus         @default(RECEIVED)
+  payload                Json                  @db.JsonB
+  attemptCount           Int                   @default(0) @map("attempt_count")
+  lastError              String?               @map("last_error") @db.Text
+  processedAt            DateTime?             @map("processed_at") @db.Timestamptz
+  createdAt              DateTime              @default(now()) @map("created_at") @db.Timestamptz
+
+  @@map("webhook_events")
+  @@index([deliveryId])
+  @@index([status, createdAt])
+}
+
+model NotificationPolicy {
+  id                String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  applicationId     String?             @map("application_id") @db.Uuid
+  application       Application?        @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  eventTrigger      String              @map("event_trigger") @db.VarChar(80)
+  channel           NotificationChannel
+  targetDestination String?             @map("target_destination") @db.VarChar(255)
+  isEnabled         Boolean             @default(true) @map("is_enabled")
+  config            Json?               @db.JsonB
+  createdAt         DateTime            @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt         DateTime            @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@map("notification_policies")
+}
