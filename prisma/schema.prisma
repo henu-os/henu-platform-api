@@ -13,8 +13,12 @@ generator client {
 
 enum ApplicationStatus {
   DRAFT
+  UNDER_REVIEW
+  APPROVED
+  PUBLISHED
   ACTIVE
   MAINTENANCE
+  DISABLED
   DEPRECATED
   ARCHIVED
 }
@@ -51,6 +55,7 @@ enum PackageFormat {
 }
 
 enum ReleaseStatus {
+  DRAFT
   DISCOVERED
   VALIDATING
   VALIDATED
@@ -58,6 +63,7 @@ enum ReleaseStatus {
   APPROVED
   PUBLISHED
   REVOKED
+  ROLLED_BACK
 }
 
 enum AssetVerificationStatus {
@@ -345,6 +351,9 @@ model CatalogueRevision {
   publishedBy        AdminUser? @relation(fields: [publishedByAdminId], references: [id], onDelete: SetNull)
   contentHash        String     @map("content_hash") @db.VarChar(64)
   manifestPayload    Json       @map("manifest_payload") @db.JsonB
+  signature          String?    @db.Text
+  signingKeyId       String?    @map("signing_key_id") @db.VarChar(64)
+  signatureAlgorithm String?    @default("ed25519") @map("signature_algorithm") @db.VarChar(32)
   applicationCount   Int        @map("application_count")
   releaseCount       Int        @map("release_count")
   summary            String     @db.VarChar(255)
@@ -354,6 +363,19 @@ model CatalogueRevision {
   @@map("catalogue_revisions")
   @@index([isActive])
   @@index([revisionNumber(sort: Desc)])
+}
+
+model HubEvent {
+  id          BigInt   @id @default(autoincrement())
+  eventId     String   @unique @default(dbgenerated("gen_random_uuid()")) @map("event_id") @db.Uuid
+  eventType   String   @map("event_type") @db.VarChar(64)
+  payload     Json     @map("payload") @db.JsonB
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@map("hub_events")
+  @@index([id])
+  @@index([eventType])
+  @@index([createdAt])
 }
 
 model WebhookEvent {

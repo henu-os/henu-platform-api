@@ -2,6 +2,8 @@ import { ConflictException, Injectable, NotFoundException, Optional } from '@nes
 import { PrismaService } from '@/prisma/prisma.service';
 import { AuditService } from '@/modules/audit/audit.service';
 import { AuthenticatedUser } from '@/common/auth/decorators/current-user.decorator';
+import { CatalogueManagementService } from '../catalogue/catalogue.service';
+import { sanitizeBigInt } from '@/common/interceptors/bigint.interceptor';
 import {
   CreateApplicationDto,
   UpdateApplicationDto,
@@ -23,6 +25,7 @@ export class AppsManagementService {
   constructor(
     private readonly auditService: AuditService,
     @Optional() private readonly prisma?: PrismaService,
+    @Optional() private readonly catalogueService?: CatalogueManagementService,
   ) {}
 
   async registerApplication(
@@ -51,8 +54,14 @@ export class AppsManagementService {
         description: dto.description,
         category: dto.category,
         developer: dto.developer ?? 'HENU OS PRIVATE LIMITED',
-        iconUrl: dto.iconUrl,
-        bannerUrl: dto.bannerUrl,
+        iconUrl:
+          dto.iconUrl && dto.iconUrl.trim().length > 0
+            ? dto.iconUrl.trim()
+            : `https://cdn.henuos.example/assets/icons/${dto.slug}.svg`,
+        bannerUrl:
+          dto.bannerUrl && dto.bannerUrl.trim().length > 0
+            ? dto.bannerUrl.trim()
+            : null,
         homepageUrl: dto.homepageUrl,
         docsUrl: dto.docsUrl,
         webAppUrl: dto.webAppUrl,
@@ -76,6 +85,19 @@ export class AppsManagementService {
       entityId: created.id,
       payload: { slug: created.slug, displayName: created.displayName },
     });
+
+    if (created.status === ApplicationStatus.ACTIVE && this.catalogueService) {
+      try {
+        await this.catalogueService.publishRevision(
+          `Auto-sync: Application '${created.displayName}' registered`,
+          actor,
+          ipAddress,
+          userAgent,
+        );
+      } catch (e) {
+        // Sync warning only
+      }
+    }
 
     return created;
   }
@@ -132,6 +154,17 @@ export class AppsManagementService {
       payload: { changes: dto },
     });
 
+    if (this.catalogueService) {
+      try {
+        await this.catalogueService.publishRevision(
+          `Auto-sync: Application '${updated.displayName}' updated`,
+          actor,
+          ipAddress,
+          userAgent,
+        );
+      } catch (e) {}
+    }
+
     return updated;
   }
 
@@ -167,6 +200,17 @@ export class AppsManagementService {
       entityId: id,
       payload: { previousStatus: app.status, newStatus: status },
     });
+
+    if (this.catalogueService) {
+      try {
+        await this.catalogueService.publishRevision(
+          `Auto-sync: Application '${app.displayName}' status set to ${status}`,
+          actor,
+          ipAddress,
+          userAgent,
+        );
+      } catch (e) {}
+    }
 
     return updated;
   }
@@ -206,7 +250,67 @@ export class AppsManagementService {
       payload: { slug: app.slug },
     });
 
+    if (this.catalogueService) {
+      try {
+        await this.catalogueService.publishRevision(
+          `Auto-sync: Application '${app.displayName}' archived`,
+          actor,
+          ipAddress,
+          userAgent,
+        );
+      } catch (e) {}
+    }
+
     return archived;
+  }
+
+  async deleteApplication(
+    id: string,
+    actor?: AuthenticatedUser,
+    ipAddress: string = '127.0.0.1',
+    userAgent?: string,
+  ) {
+    if (!this.prisma) throw new Error('Database unavailable.');
+
+    const app = await this.prisma.application.findFirst({
+      where: { id },
+    });
+
+    if (!app) {
+      throw new NotFoundException(`Application with ID '${id}' not found.`);
+    }
+
+    const deleted = await this.prisma.application.update({
+      where: { id },
+      data: {
+        status: 'ARCHIVED',
+        deletedAt: new Date(),
+      },
+    });
+
+    await this.auditService.recordLog({
+      adminUserId: actor?.id,
+      actorEmail: actor?.email || 'system',
+      ipAddress,
+      userAgent,
+      action: 'APPLICATION_DELETED',
+      entityType: 'Application',
+      entityId: id,
+      payload: { slug: app.slug },
+    });
+
+    if (this.catalogueService) {
+      try {
+        await this.catalogueService.publishRevision(
+          `Auto-sync: Application '${app.displayName}' deleted`,
+          actor,
+          ipAddress,
+          userAgent,
+        );
+      } catch (e) {}
+    }
+
+    return deleted;
   }
 
   async getApplication(idOrSlug: string) {
@@ -232,7 +336,7 @@ export class AppsManagementService {
       throw new NotFoundException(`Application '${idOrSlug}' not found.`);
     }
 
-    return app;
+    return sanitizeBigInt(app);
   }
 
   async listApplications(query: QueryApplicationsDto) {

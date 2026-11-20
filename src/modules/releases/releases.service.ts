@@ -8,6 +8,7 @@ import {
 import { PrismaService } from '@/prisma/prisma.service';
 import { AuditService } from '@/modules/audit/audit.service';
 import { GitHubAppService } from '@/modules/github/github.service';
+import { RealtimeEventsService } from '@/common/realtime/realtime-events.service';
 import { SemverParser } from './classifier/semver.parser';
 import { AssetClassifier } from './classifier/asset.classifier';
 import { ReleaseStatus, AssetVerificationStatus, Prisma } from '@prisma/client';
@@ -49,6 +50,7 @@ export class ReleasesService {
     private readonly auditService: AuditService,
     private readonly gitHubAppService: GitHubAppService,
     @Optional() private readonly prisma?: PrismaService,
+    @Optional() private readonly realtimeEventsService?: RealtimeEventsService,
   ) {}
 
   async processReleaseWebhook(payload: GitHubWebhookReleasePayload) {
@@ -408,6 +410,17 @@ export class ReleasesService {
       },
     });
 
+    this.realtimeEventsService?.broadcast('release:published', {
+      releaseId,
+      version: release.version,
+      channel: targetChannel.name,
+      timestamp: new Date().toISOString(),
+    });
+    this.realtimeEventsService?.broadcast('catalogue:updated', {
+      source: 'release:promoted',
+      releaseId,
+    });
+
     return updated;
   }
 
@@ -445,6 +458,16 @@ export class ReleasesService {
       entityType: 'Release',
       entityId: releaseId,
       payload: { reason },
+    });
+
+    this.realtimeEventsService?.broadcast('release:revoked', {
+      releaseId,
+      reason,
+      timestamp: new Date().toISOString(),
+    });
+    this.realtimeEventsService?.broadcast('catalogue:updated', {
+      source: 'release:revoked',
+      releaseId,
     });
 
     return updated;

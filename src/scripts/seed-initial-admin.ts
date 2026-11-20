@@ -14,7 +14,7 @@ async function main() {
       '❌ ERROR: INITIAL_ADMIN_EMAIL and INITIAL_ADMIN_PASSWORD environment variables are required.',
     );
     console.error(
-      'Usage: INITIAL_ADMIN_EMAIL="admin@henuos.com" INITIAL_ADMIN_PASSWORD="StrongPassword123!" npm run seed:admin',
+      'Usage: INITIAL_ADMIN_EMAIL="admin@henuos.in" INITIAL_ADMIN_PASSWORD="<STRONG_COMPLEX_PASSWORD_MIN_10_CHARS>" npm run seed:admin',
     );
     process.exit(1);
   }

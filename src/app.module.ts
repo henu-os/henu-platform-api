@@ -16,6 +16,8 @@ import { AdminModule } from './modules/admin/admin.module';
 import { WebhooksModule } from './modules/webhooks/webhooks.module';
 import { ReleasesModule } from './modules/releases/releases.module';
 import { GitHubModule } from './modules/github/github.module';
+import { RealtimeModule } from './common/realtime/realtime.module';
+import { CryptoModule } from './common/crypto/crypto.module';
 
 @Module({
   imports: [
@@ -36,6 +38,8 @@ import { GitHubModule } from './modules/github/github.module';
       ],
     }),
     PrismaModule,
+    RealtimeModule,
+    CryptoModule,
     AuditModule,
     AuthModule,
     GitHubModule,

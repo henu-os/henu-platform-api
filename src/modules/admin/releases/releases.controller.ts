@@ -20,6 +20,7 @@ import { RequirePermissions } from '@/common/auth/decorators/require-permissions
 import { CurrentUser, AuthenticatedUser } from '@/common/auth/decorators/current-user.decorator';
 import { PermissionCode } from '@/common/auth/constants';
 import { ReleasesService } from '@/modules/releases/releases.service';
+import { CatalogueManagementService } from '../catalogue/catalogue.service';
 import {
   ListReleasesQueryDto,
   PromoteReleaseDto,
@@ -31,7 +32,10 @@ import {
 @Controller('admin/releases')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 export class ReleasesManagementController {
-  constructor(private readonly releasesService: ReleasesService) {}
+  constructor(
+    private readonly releasesService: ReleasesService,
+    private readonly catalogueService: CatalogueManagementService,
+  ) {}
 
   @Get()
   @RequirePermissions(PermissionCode.RELEASES_READ)
@@ -82,7 +86,16 @@ export class ReleasesManagementController {
     @Req() req: Request,
   ) {
     const userAgent = req.headers['user-agent'];
-    return this.releasesService.promoteRelease(id, dto.targetChannel, user, ipAddress, userAgent);
+    const updated = await this.releasesService.promoteRelease(id, dto.targetChannel, user, ipAddress, userAgent);
+    try {
+      await this.catalogueService.publishRevision(
+        `Auto-publish: Release ${updated.version} promoted to ${dto.targetChannel}`,
+        user,
+        ipAddress,
+        userAgent,
+      );
+    } catch {}
+    return updated;
   }
 
   @Post(':id/revoke')
@@ -99,6 +112,15 @@ export class ReleasesManagementController {
     @Req() req: Request,
   ) {
     const userAgent = req.headers['user-agent'];
-    return this.releasesService.revokeRelease(id, dto.reason, user, ipAddress, userAgent);
+    const updated = await this.releasesService.revokeRelease(id, dto.reason, user, ipAddress, userAgent);
+    try {
+      await this.catalogueService.publishRevision(
+        `Auto-publish: Release ${updated.version} revoked: ${dto.reason}`,
+        user,
+        ipAddress,
+        userAgent,
+      );
+    } catch {}
+    return updated;
   }
 }

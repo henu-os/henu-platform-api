@@ -7,6 +7,15 @@ import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { Rfc7807ExceptionFilter } from './common/filters/rfc7807-exception.filter';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
+import { BigIntInterceptor } from './common/interceptors/bigint.interceptor';
+
+// Enable native BigInt JSON serialization globally across all controllers and responses
+if (!(BigInt.prototype as any).toJSON) {
+  (BigInt.prototype as any).toJSON = function () {
+    const n = Number(this);
+    return Number.isSafeInteger(n) ? n : this.toString();
+  };
+}
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
@@ -49,7 +58,12 @@ async function bootstrap() {
       if (
         combinedAllowedOrigins.includes(origin) ||
         origin.startsWith('tauri://') ||
-        origin.startsWith('vscode-webview://')
+        origin.startsWith('vscode-webview://') ||
+        origin.startsWith('http://localhost') ||
+        origin.startsWith('http://127.0.0.1') ||
+        origin.endsWith('.netlify.app') ||
+        origin.endsWith('.henuos.in') ||
+        origin.endsWith('.henuos.com')
       ) {
         return callback(null, true);
       }
@@ -85,15 +99,25 @@ async function bootstrap() {
   );
 
   app.useGlobalFilters(new Rfc7807ExceptionFilter());
-  app.useGlobalInterceptors(new LoggingInterceptor());
+  app.useGlobalInterceptors(new BigIntInterceptor(), new LoggingInterceptor());
 
   // Swagger OpenAPI Documentation
   const swaggerConfig = new DocumentBuilder()
     .setTitle('HENU Platform API')
     .setDescription(
-      'Central backend, release orchestration, and catalog publication engine for the HENU software ecosystem.',
+      'Central backend, release orchestration, and catalogue publication engine for HENU OS PRIVATE LIMITED.\n\n' +
+        'Official Website: https://www.henuos.in/\n' +
+        'Contact & Inquiries: https://www.henuos.in/contact | info@henuos.in | support.henuos@gmail.com\n' +
+        'Support Hotline & WhatsApp: +91 8094100513 (https://wa.me/918094100513)\n' +
+        'Consultation Scheduling: https://calendly.com/henuos/30min',
     )
-    .setVersion('1.0.0')
+    .setVersion('1.1.0')
+    .setContact(
+      'HENU OS PRIVATE LIMITED Support',
+      'https://www.henuos.in/contact',
+      'info@henuos.in',
+    )
+    .setLicense('Proprietary / All Rights Reserved', 'https://www.henuos.in/')
     .addBearerAuth(
       {
         type: 'http',
@@ -115,7 +139,7 @@ async function bootstrap() {
   // Enable graceful process termination
   app.enableShutdownHooks();
 
-  await app.listen(port);
+  await app.listen(port, '0.0.0.0');
   logger.log(`HENU Platform API running on port ${port} [Prefix: /${apiPrefix}]`);
   logger.log(`OpenAPI Documentation available at: http://localhost:${port}/api/docs`);
 }

@@ -30,6 +30,10 @@ export class EnvironmentVariables {
   API_PREFIX: string = 'api/v1';
 
   @IsString()
+  @IsOptional()
+  API_BASE_URL?: string = 'https://henu-platform-api.onrender.com';
+
+  @IsString()
   @IsNotEmpty()
   DATABASE_URL: string;
 

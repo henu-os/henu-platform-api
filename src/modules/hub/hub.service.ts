@@ -1,10 +1,18 @@
 import { Injectable, NotFoundException, Optional } from '@nestjs/common';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
+import { spawnSync } from 'child_process';
 import { PrismaService } from '@/prisma/prisma.service';
 import {
   CatalogueManifestResponseDto,
   CatalogueApplicationDto,
 } from './dto/catalogue-response.dto';
 import { UpdateCheckQueryDto, UpdateCheckResponseDto } from './dto/update-check.dto';
+import {
+  CreateDesktopShortcutDto,
+  DesktopShortcutResponseDto,
+} from './dto/desktop-shortcut.dto';
 
 @Injectable()
 export class HubService {
@@ -95,6 +103,93 @@ export class HubService {
             packageFormat: matchedAsset.packageFormat,
           }
         : undefined,
+    };
+  }
+
+  async createDesktopShortcut(dto: CreateDesktopShortcutDto): Promise<DesktopShortcutResponseDto> {
+    if (os.platform() !== 'win32') {
+      return { success: true, createdShortcuts: [], message: 'Shortcuts only managed on Windows' };
+    }
+
+    const home = os.homedir();
+    const candidateDirs = [
+      path.join(home, 'OneDrive', 'Desktop'),
+      path.join(home, 'Desktop'),
+      process.env.USERPROFILE ? path.join(process.env.USERPROFILE, 'OneDrive', 'Desktop') : null,
+      process.env.USERPROFILE ? path.join(process.env.USERPROFILE, 'Desktop') : null,
+    ].filter((p): p is string => Boolean(p && fs.existsSync(p)));
+
+    const desktopDirs = Array.from(new Set(candidateDirs));
+    const createdShortcuts: string[] = [];
+    const sanitizedName = dto.name.replace(/[\\/:*?"<>|]/g, '').trim();
+
+    for (const dir of desktopDirs) {
+      try {
+        if (dto.isWebApp || dto.targetPath.startsWith('http://') || dto.targetPath.startsWith('https://')) {
+          // 1. Create standard Windows .url file for web apps
+          const urlFilePath = path.join(dir, `${sanitizedName}.url`);
+          const urlContent = `[InternetShortcut]\r\nURL=${dto.targetPath}\r\nIconIndex=0\r\n`;
+          fs.writeFileSync(urlFilePath, urlContent, 'utf8');
+          createdShortcuts.push(urlFilePath);
+        } else {
+          // 2. Create native .lnk file for desktop executables
+          const lnkFilePath = path.join(dir, `${sanitizedName}.lnk`);
+          const workingDir = path.dirname(dto.targetPath);
+          const psScript = `$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut('${lnkFilePath.replace(/'/g, "''")}'); $s.TargetPath = '${dto.targetPath.replace(/'/g, "''")}'; $s.WorkingDirectory = '${workingDir.replace(/'/g, "''")}'; $s.Save();`;
+          spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', psScript], {
+            windowsHide: true,
+            timeout: 5000,
+          });
+          if (fs.existsSync(lnkFilePath)) {
+            createdShortcuts.push(lnkFilePath);
+          }
+        }
+      } catch (err) {
+        console.error(`Failed to create desktop shortcut in ${dir}:`, err);
+      }
+    }
+
+    return {
+      success: createdShortcuts.length > 0,
+      createdShortcuts,
+      message: `Created ${createdShortcuts.length} desktop shortcut(s)`,
+    };
+  }
+
+  async removeDesktopShortcut(name: string): Promise<{ success: boolean; removedShortcuts: string[] }> {
+    if (os.platform() !== 'win32') {
+      return { success: true, removedShortcuts: [] };
+    }
+
+    const home = os.homedir();
+    const candidateDirs = [
+      path.join(home, 'OneDrive', 'Desktop'),
+      path.join(home, 'Desktop'),
+      process.env.USERPROFILE ? path.join(process.env.USERPROFILE, 'OneDrive', 'Desktop') : null,
+      process.env.USERPROFILE ? path.join(process.env.USERPROFILE, 'Desktop') : null,
+    ].filter((p): p is string => Boolean(p && fs.existsSync(p)));
+
+    const desktopDirs = Array.from(new Set(candidateDirs));
+    const removedShortcuts: string[] = [];
+    const sanitizedName = name.replace(/[\\/:*?"<>|]/g, '').trim();
+
+    for (const dir of desktopDirs) {
+      for (const ext of ['.url', '.lnk']) {
+        const filePath = path.join(dir, `${sanitizedName}${ext}`);
+        if (fs.existsSync(filePath)) {
+          try {
+            fs.unlinkSync(filePath);
+            removedShortcuts.push(filePath);
+          } catch (err) {
+            console.error(`Failed to remove desktop shortcut ${filePath}:`, err);
+          }
+        }
+      }
+    }
+
+    return {
+      success: true,
+      removedShortcuts,
     };
   }
 

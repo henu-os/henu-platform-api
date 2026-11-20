@@ -120,6 +120,21 @@ export class AppsManagementController {
     return this.appsService.archiveApplication(id, actor, ipAddress, userAgent);
   }
 
+  @Delete(':id')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions(PermissionCode.APPS_DELETE)
+  @ApiOperation({ summary: 'Delete an application and remove from active catalogue' })
+  @ApiResponse({ status: 200, description: 'Application deleted' })
+  async deleteApp(
+    @Param('id') id: string,
+    @CurrentUser() actor: AuthenticatedUser,
+    @Ip() ipAddress: string,
+    @Req() req: Request,
+  ) {
+    const userAgent = req.get('user-agent');
+    return this.appsService.deleteApplication(id, actor, ipAddress, userAgent);
+  }
+
   @Post(':id/compatibility')
   @HttpCode(HttpStatus.CREATED)
   @RequirePermissions(PermissionCode.COMPAT_MANAGE)

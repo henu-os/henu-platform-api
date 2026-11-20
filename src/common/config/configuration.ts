@@ -2,6 +2,7 @@ export default () => ({
   environment: process.env.NODE_ENV || 'development',
   port: parseInt(process.env.PORT || '3000', 10),
   apiPrefix: process.env.API_PREFIX || 'api/v1',
+  apiBaseUrl: process.env.API_BASE_URL || 'https://henu-platform-api.onrender.com',
   database: {
     url: process.env.DATABASE_URL,
   },

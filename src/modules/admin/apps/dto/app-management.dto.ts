@@ -6,7 +6,6 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
-  IsUrl,
   Min,
   Matches,
 } from 'class-validator';
@@ -87,30 +86,35 @@ export class CreateApplicationDto {
   @IsOptional()
   developer?: string = 'HENU OS PRIVATE LIMITED';
 
-  @ApiProperty({ example: 'https://assets.henuos.com/icons/henu-pa.svg' })
-  @IsUrl()
-  @IsNotEmpty()
-  iconUrl: string;
+  @ApiPropertyOptional({ example: 'https://assets.henuos.com/icons/henu-pa.svg' })
+  @IsString()
+  @IsOptional()
+  iconUrl?: string;
 
   @ApiPropertyOptional({ example: 'https://assets.henuos.com/banners/henu-pa.webp' })
-  @IsUrl()
+  @IsString()
   @IsOptional()
   bannerUrl?: string;
 
   @ApiPropertyOptional({ example: 'https://henuos.com/apps/pa' })
-  @IsUrl()
+  @IsString()
   @IsOptional()
   homepageUrl?: string;
 
   @ApiPropertyOptional({ example: 'https://docs.henuos.com/pa' })
-  @IsUrl()
+  @IsString()
   @IsOptional()
   docsUrl?: string;
 
   @ApiPropertyOptional({ example: 'https://app.henuos.com/pa' })
-  @IsUrl()
+  @IsString()
   @IsOptional()
   webAppUrl?: string;
+
+  @ApiPropertyOptional({ example: 'PUBLIC' })
+  @IsString()
+  @IsOptional()
+  visibility?: string;
 
   @ApiPropertyOptional({ example: 'Proprietary' })
   @IsString()
@@ -181,29 +185,34 @@ export class UpdateApplicationDto {
   developer?: string;
 
   @ApiPropertyOptional()
-  @IsUrl()
+  @IsString()
   @IsOptional()
   iconUrl?: string;
 
   @ApiPropertyOptional()
-  @IsUrl()
+  @IsString()
   @IsOptional()
   bannerUrl?: string;
 
   @ApiPropertyOptional()
-  @IsUrl()
+  @IsString()
   @IsOptional()
   homepageUrl?: string;
 
   @ApiPropertyOptional()
-  @IsUrl()
+  @IsString()
   @IsOptional()
   docsUrl?: string;
 
   @ApiPropertyOptional()
-  @IsUrl()
+  @IsString()
   @IsOptional()
   webAppUrl?: string;
+
+  @ApiPropertyOptional()
+  @IsString()
+  @IsOptional()
+  visibility?: string;
 
   @ApiPropertyOptional()
   @IsString()
