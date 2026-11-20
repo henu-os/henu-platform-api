@@ -113,6 +113,46 @@ describe('WebhooksService', () => {
       );
     });
 
+    it('should handle un-registered repository connection cleanly with null connection ID', async () => {
+      prisma.webhookEvent.findUnique.mockResolvedValue(null);
+      prisma.repositoryConnection.findUnique.mockResolvedValue(null);
+      prisma.webhookEvent.create.mockResolvedValue({
+        id: 'wh-record-unreg',
+        deliveryId: 'del-unreg-1',
+        status: WebhookStatus.RECEIVED,
+      });
+      releasesService.processReleaseWebhook.mockResolvedValue({
+        status: 'ignored',
+        reason: 'Repository connection not found or inactive',
+      });
+
+      const payload = {
+        action: 'published',
+        release: { id: 99 },
+        repository: { name: 'unregistered-repo', owner: { login: 'henu-os' } },
+      };
+
+      const res = await service.processGitHubWebhook('del-unreg-1', 'release', payload);
+
+      expect(res.status).toBe('received');
+      expect(prisma.webhookEvent.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            deliveryId: 'del-unreg-1',
+            repositoryConnectionId: undefined,
+          }),
+        }),
+      );
+      expect(prisma.webhookEvent.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'wh-record-unreg' },
+          data: expect.objectContaining({
+            status: WebhookStatus.IGNORED,
+          }),
+        }),
+      );
+    });
+
     it('should mark webhook as FAILED and record error if release processing throws', async () => {
       prisma.webhookEvent.findUnique.mockResolvedValue(null);
       prisma.repositoryConnection.findUnique.mockResolvedValue(null);
