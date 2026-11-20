@@ -304,6 +304,56 @@ describe('ReleasesService', () => {
       );
     });
 
+    it('should reject assets with untrusted or non-HTTPS download URLs', async () => {
+      prisma.repositoryConnection.findUnique.mockResolvedValue(mockConnection);
+      prisma.release.upsert.mockResolvedValue({ id: 'rel-untrusted-1' });
+      prisma.releaseAsset.upsert.mockResolvedValue({ id: 'asset-untrusted-1' });
+      prisma.release.update.mockResolvedValue({
+        id: 'rel-untrusted-1',
+        status: ReleaseStatus.REJECTED,
+      });
+
+      const payload: GitHubWebhookReleasePayload = {
+        action: 'published',
+        release: {
+          id: 105,
+          tag_name: 'v1.0.0',
+          target_commitish: 'main',
+          name: 'v1.0.0 Suspicious Release',
+          draft: false,
+          prerelease: false,
+          created_at: new Date().toISOString(),
+          published_at: new Date().toISOString(),
+          body: 'Notes',
+          assets: [
+            {
+              id: 601,
+              name: 'henu-pa-windows-x64.exe',
+              size: 50000000,
+              browser_download_url: 'http://malicious-external-site.com/henu-pa-windows-x64.exe',
+              content_type: 'application/octet-stream',
+            },
+          ],
+        },
+        repository: {
+          name: 'henu-pa',
+          owner: { login: 'henu-os' },
+        },
+      };
+
+      const result = await service.processReleaseWebhook(payload);
+      expect(result.status).toBe('rejected');
+      expect(prisma.releaseAsset.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          update: expect.objectContaining({
+            isInstallable: false,
+            verificationStatus: 'REJECTED',
+            verificationError: expect.stringContaining('Untrusted or non-HTTPS asset download URL origin'),
+          }),
+        }),
+      );
+    });
+
     it('should auto-publish BETA release when connection allows it', async () => {
       prisma.repositoryConnection.findUnique.mockResolvedValue(mockConnection);
       prisma.release.upsert.mockResolvedValue({ id: 'rel-beta-1' });

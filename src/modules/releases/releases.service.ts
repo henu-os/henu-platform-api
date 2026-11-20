@@ -42,6 +42,23 @@ export interface GitHubWebhookReleasePayload {
   };
 }
 
+export function isTrustedDownloadUrl(url?: string): boolean {
+  if (!url || typeof url !== 'string') return false;
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'https:') return false;
+    const hostname = parsed.hostname.toLowerCase();
+    return (
+      hostname === 'github.com' ||
+      hostname.endsWith('.github.com') ||
+      hostname === 'objects.githubusercontent.com' ||
+      hostname.endsWith('.githubusercontent.com')
+    );
+  } catch {
+    return false;
+  }
+}
+
 @Injectable()
 export class ReleasesService {
   private readonly logger = new Logger(ReleasesService.name);
@@ -218,6 +235,8 @@ export class ReleasesService {
 
       // Match with PlatformCompatibility profile
       let matchedCompatId: string | null = null;
+      const isUrlTrusted = isTrustedDownloadUrl(rawAsset.browser_download_url);
+
       if (
         classified.isInstallable &&
         classified.os &&
@@ -232,9 +251,23 @@ export class ReleasesService {
         );
         if (matched) {
           matchedCompatId = matched.id;
-          installableAssetCount++;
         }
       }
+
+      const isEffectivelyInstallable =
+        classified.isInstallable && !!matchedCompatId && isUrlTrusted;
+
+      if (isEffectivelyInstallable) {
+        installableAssetCount++;
+      }
+
+      const verificationStatus = isEffectivelyInstallable
+        ? AssetVerificationStatus.VERIFIED
+        : AssetVerificationStatus.REJECTED;
+
+      const verificationError = !isUrlTrusted
+        ? 'Untrusted or non-HTTPS asset download URL origin.'
+        : classified.rejectionReason;
 
       await this.prisma.releaseAsset.upsert({
         where: { githubAssetId: BigInt(rawAsset.id) },
@@ -246,12 +279,9 @@ export class ReleasesService {
           sizeBytes: BigInt(rawAsset.size),
           contentType: rawAsset.content_type || 'application/octet-stream',
           sha256,
-          isInstallable: classified.isInstallable && !!matchedCompatId,
-          verificationStatus:
-            classified.isInstallable && !!matchedCompatId
-              ? AssetVerificationStatus.VERIFIED
-              : AssetVerificationStatus.REJECTED,
-          verificationError: classified.rejectionReason,
+          isInstallable: isEffectivelyInstallable,
+          verificationStatus,
+          verificationError,
         },
         create: {
           releaseId: releaseRecord.id,
@@ -262,12 +292,9 @@ export class ReleasesService {
           sizeBytes: BigInt(rawAsset.size),
           contentType: rawAsset.content_type || 'application/octet-stream',
           sha256,
-          isInstallable: classified.isInstallable && !!matchedCompatId,
-          verificationStatus:
-            classified.isInstallable && !!matchedCompatId
-              ? AssetVerificationStatus.VERIFIED
-              : AssetVerificationStatus.REJECTED,
-          verificationError: classified.rejectionReason,
+          isInstallable: isEffectivelyInstallable,
+          verificationStatus,
+          verificationError,
         },
       });
     }
