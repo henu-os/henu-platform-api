@@ -24,6 +24,13 @@ describe('WebhooksService', () => {
       },
       repositoryConnection: {
         findUnique: jest.fn(),
+        update: jest.fn(),
+        updateMany: jest.fn(),
+        create: jest.fn(),
+      },
+      application: {
+        findUnique: jest.fn(),
+        create: jest.fn(),
       },
     };
 
@@ -182,6 +189,99 @@ describe('WebhooksService', () => {
           }),
         }),
       );
+    });
+
+    it('should process installation.created event and sync repositories', async () => {
+      prisma.webhookEvent.findUnique.mockResolvedValue(null);
+      prisma.webhookEvent.create.mockResolvedValue({
+        id: 'wh-inst-1',
+        deliveryId: 'del-inst-1',
+      });
+      prisma.repositoryConnection.findUnique.mockResolvedValue(null);
+      prisma.application.findUnique.mockResolvedValue({ id: 'app-hub-id', slug: 'henu-hub' });
+      prisma.repositoryConnection.create.mockResolvedValue({ id: 'conn-hub-id' });
+
+      const payload = {
+        action: 'created',
+        installation: { id: 183938025, account: { login: 'henu-os' } },
+        repositories: [{ name: 'henu-hub' }],
+      };
+
+      const res = await service.processGitHubWebhook('del-inst-1', 'installation', payload);
+
+      expect(res.status).toBe('received');
+      expect(res.message).toContain('Installation event processed: created');
+      expect(prisma.repositoryConnection.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            repoOwner: 'henu-os',
+            repoName: 'henu-hub',
+            githubInstallationId: BigInt(183938025),
+            isActive: true,
+          }),
+        }),
+      );
+    });
+
+    it('should process installation_repositories.added event and update existing connections', async () => {
+      prisma.webhookEvent.findUnique.mockResolvedValue(null);
+      prisma.webhookEvent.create.mockResolvedValue({
+        id: 'wh-repos-added-1',
+        deliveryId: 'del-repos-added-1',
+      });
+      prisma.repositoryConnection.findUnique.mockResolvedValue({
+        id: 'existing-conn-id',
+        repoOwner: 'henu-os',
+        repoName: 'henu-platform-api',
+      });
+      prisma.repositoryConnection.update.mockResolvedValue({});
+
+      const payload = {
+        action: 'added',
+        installation: { id: 183938025, account: { login: 'henu-os' } },
+        repositories_added: [{ name: 'henu-platform-api' }],
+      };
+
+      const res = await service.processGitHubWebhook('del-repos-added-1', 'installation_repositories', payload);
+
+      expect(res.status).toBe('received');
+      expect(res.message).toContain('Installation repositories event processed: added');
+      expect(prisma.repositoryConnection.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'existing-conn-id' },
+          data: expect.objectContaining({
+            githubInstallationId: BigInt(183938025),
+            isActive: true,
+          }),
+        }),
+      );
+    });
+
+    it('should process installation_repositories.removed event and deactivate connections', async () => {
+      prisma.webhookEvent.findUnique.mockResolvedValue(null);
+      prisma.webhookEvent.create.mockResolvedValue({
+        id: 'wh-repos-removed-1',
+        deliveryId: 'del-repos-removed-1',
+      });
+      prisma.repositoryConnection.updateMany.mockResolvedValue({ count: 1 });
+
+      const payload = {
+        action: 'removed',
+        installation: { id: 183938025, account: { login: 'henu-os' } },
+        repositories_removed: [{ name: 'henu-platform-api' }],
+      };
+
+      const res = await service.processGitHubWebhook('del-repos-removed-1', 'installation_repositories', payload);
+
+      expect(res.status).toBe('received');
+      expect(res.message).toContain('Installation repositories event processed: removed');
+      expect(prisma.repositoryConnection.updateMany).toHaveBeenCalledWith({
+        where: {
+          repoOwner: 'henu-os',
+          repoName: 'henu-platform-api',
+        },
+        data: { isActive: false },
+      });
     });
   });
 

@@ -27,10 +27,17 @@ export class HealthController {
   async checkReadiness() {
     let databaseStatus = 'disconnected';
 
+    let tablesCount = 0;
     if (this.prisma) {
       try {
         await this.prisma.$queryRaw`SELECT 1`;
         databaseStatus = 'connected';
+
+        const tableRows = await this.prisma.$queryRaw<Array<{ count: number }>>`
+          SELECT count(*)::int as count FROM information_schema.tables 
+          WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
+        `;
+        tablesCount = Number(tableRows[0]?.count || 0);
       } catch (err) {
         databaseStatus = `unavailable: ${(err as Error).message}`;
       }
@@ -55,6 +62,7 @@ export class HealthController {
           rawUrl.includes('REPLACE_WITH') ||
           rawUrl.includes('placeholder') ||
           rawUrl.includes('example.com'),
+        tablesCount,
         prismaInitialized: Boolean(this.prisma),
       },
     };

@@ -147,6 +147,86 @@ export class WebhooksService {
         }
       }
 
+      // 5. Ingest installation event
+      if (eventType === 'installation') {
+        try {
+          const installResult = await this.handleInstallationEvent(payload);
+          await this.prisma.webhookEvent.update({
+            where: { id: webhookRecord.id },
+            data: {
+              status: WebhookStatus.PROCESSED,
+              processedAt: new Date(),
+            },
+          });
+
+          return {
+            status: 'received',
+            deliveryId,
+            eventType,
+            message: `Installation event processed: ${installResult.action}`,
+            details: installResult,
+          };
+        } catch (installErr) {
+          const errorMsg = (installErr as Error).message;
+          this.logger.error(`Installation processing failed for delivery ${deliveryId}: ${errorMsg}`);
+
+          await this.prisma.webhookEvent.update({
+            where: { id: webhookRecord.id },
+            data: {
+              status: WebhookStatus.FAILED,
+              lastError: errorMsg,
+            },
+          });
+
+          return {
+            status: 'failed',
+            deliveryId,
+            eventType,
+            message: `Installation processing encountered an error: ${errorMsg}`,
+          };
+        }
+      }
+
+      // 6. Ingest installation_repositories event
+      if (eventType === 'installation_repositories') {
+        try {
+          const repoResult = await this.handleInstallationRepositoriesEvent(payload);
+          await this.prisma.webhookEvent.update({
+            where: { id: webhookRecord.id },
+            data: {
+              status: WebhookStatus.PROCESSED,
+              processedAt: new Date(),
+            },
+          });
+
+          return {
+            status: 'received',
+            deliveryId,
+            eventType,
+            message: `Installation repositories event processed: ${repoResult.action}`,
+            details: repoResult,
+          };
+        } catch (repoErr) {
+          const errorMsg = (repoErr as Error).message;
+          this.logger.error(`Installation repositories processing failed for delivery ${deliveryId}: ${errorMsg}`);
+
+          await this.prisma.webhookEvent.update({
+            where: { id: webhookRecord.id },
+            data: {
+              status: WebhookStatus.FAILED,
+              lastError: errorMsg,
+            },
+          });
+
+          return {
+            status: 'failed',
+            deliveryId,
+            eventType,
+            message: `Installation repositories processing encountered an error: ${errorMsg}`,
+          };
+        }
+      }
+
       return {
         status: 'received',
         deliveryId,
@@ -305,5 +385,157 @@ export class WebhooksService {
 
       throw err;
     }
+  }
+
+  private async handleInstallationEvent(payload: Record<string, unknown>) {
+    const action = (payload['action'] as string) || 'unknown';
+    const installation = payload['installation'] as
+      | { id: number; account?: { login?: string } }
+      | undefined;
+    if (!installation?.id || !this.prisma) {
+      return { action, count: 0 };
+    }
+
+    const installationId = BigInt(installation.id);
+    const accountLogin = (installation.account?.login || 'henu-os').trim().toLowerCase();
+    const repositories = (payload['repositories'] as Array<{ name: string }>) || [];
+
+    if (action === 'deleted') {
+      const updateResult = await this.prisma.repositoryConnection.updateMany({
+        where: { githubInstallationId: installationId },
+        data: { isActive: false },
+      });
+      return { action, count: updateResult.count };
+    }
+
+    if (action === 'created' || action === 'new_permissions_accepted') {
+      let linkedCount = 0;
+      for (const repo of repositories) {
+        if (!repo?.name) continue;
+        const repoName = repo.name.trim().toLowerCase();
+        await this.syncRepositoryConnection(accountLogin, repoName, installationId);
+        linkedCount++;
+      }
+      return { action, count: linkedCount };
+    }
+
+    return { action, count: 0 };
+  }
+
+  private async handleInstallationRepositoriesEvent(payload: Record<string, unknown>) {
+    const action = (payload['action'] as string) || 'unknown';
+    const installation = payload['installation'] as
+      | { id: number; account?: { login?: string } }
+      | undefined;
+    if (!installation?.id || !this.prisma) {
+      return { action, count: 0 };
+    }
+
+    const installationId = BigInt(installation.id);
+    const accountLogin = (installation.account?.login || 'henu-os').trim().toLowerCase();
+    const reposAdded = (payload['repositories_added'] as Array<{ name: string }>) || [];
+    const reposRemoved = (payload['repositories_removed'] as Array<{ name: string }>) || [];
+
+    if (action === 'added') {
+      let addedCount = 0;
+      for (const repo of reposAdded) {
+        if (!repo?.name) continue;
+        const repoName = repo.name.trim().toLowerCase();
+        await this.syncRepositoryConnection(accountLogin, repoName, installationId);
+        addedCount++;
+      }
+      return { action, count: addedCount };
+    }
+
+    if (action === 'removed') {
+      let removedCount = 0;
+      for (const repo of reposRemoved) {
+        if (!repo?.name) continue;
+        const repoName = repo.name.trim().toLowerCase();
+        await this.prisma.repositoryConnection.updateMany({
+          where: {
+            repoOwner: accountLogin,
+            repoName,
+          },
+          data: { isActive: false },
+        });
+        removedCount++;
+      }
+      return { action, count: removedCount };
+    }
+
+    return { action, count: 0 };
+  }
+
+  private async syncRepositoryConnection(
+    repoOwner: string,
+    repoName: string,
+    githubInstallationId: bigint,
+  ) {
+    if (!this.prisma) return;
+
+    // 1. Check existing connection
+    const existing = await this.prisma.repositoryConnection.findUnique({
+      where: {
+        repoOwner_repoName: {
+          repoOwner,
+          repoName,
+        },
+      },
+    });
+
+    if (existing) {
+      await this.prisma.repositoryConnection.update({
+        where: { id: existing.id },
+        data: {
+          githubInstallationId,
+          isActive: true,
+          deletedAt: null,
+          lastSyncAt: new Date(),
+        },
+      });
+      return;
+    }
+
+    // 2. Check if application exists matching repoName as slug
+    let app = await this.prisma.application.findUnique({
+      where: { slug: repoName },
+    });
+
+    if (!app) {
+      // Create minimal Application shell for this connected repository
+      app = await this.prisma.application.create({
+        data: {
+          slug: repoName,
+          displayName: repoName
+            .split('-')
+            .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+            .join(' '),
+          summary: `HENU ${repoName} service`,
+          description: `Official HENU repository connection for ${repoOwner}/${repoName}.`,
+          category: 'Platforms',
+          developer: 'HENU OS PRIVATE LIMITED',
+          iconUrl: 'https://www.henuos.in/favicon.ico',
+          status: 'ACTIVE',
+        },
+      });
+    }
+
+    // 3. Create the repository connection record
+    await this.prisma.repositoryConnection.create({
+      data: {
+        applicationId: app.id,
+        provider: 'GITHUB',
+        repoOwner,
+        repoName,
+        githubInstallationId,
+        targetBranch: 'main',
+        assetPattern: '.*\\.(exe|msi|dmg|AppImage|deb|rpm|zip)$',
+        tagPattern: '^v?[0-9]+\\.[0-9]+\\.[0-9]+',
+        autoIngestReleases: true,
+        isActive: true,
+        lastSyncAt: new Date(),
+      },
+    });
   }
 }
