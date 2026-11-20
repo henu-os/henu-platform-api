@@ -38,12 +38,34 @@ export class HealthController {
 
     const isReady = databaseStatus === 'connected';
 
+    const rawUrl = process.env.DATABASE_URL || '';
+    const trimmed = rawUrl.trim();
+    const diagnostics = {
+      database: {
+        configured: rawUrl.length > 0,
+        length: rawUrl.length,
+        startsWithProtocol:
+          trimmed.startsWith('postgresql://') || trimmed.startsWith('postgres://'),
+        hasEnclosingQuotes:
+          (rawUrl.startsWith('"') && rawUrl.endsWith('"')) ||
+          (rawUrl.startsWith("'") && rawUrl.endsWith("'")),
+        hasWhitespace: /\s/.test(rawUrl),
+        startsWithPsqlCli: trimmed.startsWith('psql'),
+        containsPlaceholder:
+          rawUrl.includes('REPLACE_WITH') ||
+          rawUrl.includes('placeholder') ||
+          rawUrl.includes('example.com'),
+        prismaInitialized: Boolean(this.prisma),
+      },
+    };
+
     return {
       status: isReady ? 'ok' : 'degraded',
       timestamp: new Date().toISOString(),
       services: {
         database: databaseStatus,
       },
+      diagnostics,
     };
   }
 }
