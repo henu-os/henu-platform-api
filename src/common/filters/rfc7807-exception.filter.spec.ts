@@ -36,7 +36,7 @@ describe('Rfc7807ExceptionFilter', () => {
     expect(mockResponse.header).toHaveBeenCalledWith('Content-Type', 'application/problem+json');
     expect(mockResponse.json).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: 'https://api.henuos.com/errors/not-found',
+        type: 'https://henu-platform-api.onrender.com/errors/not-found',
         title: 'Not Found',
         status: 404,
         detail: 'Resource not found',
@@ -56,7 +56,7 @@ describe('Rfc7807ExceptionFilter', () => {
     expect(mockResponse.header).toHaveBeenCalledWith('Content-Type', 'application/problem+json');
     expect(mockResponse.json).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: 'https://api.henuos.com/errors/internal-server-error',
+        type: 'https://henu-platform-api.onrender.com/errors/internal-server-error',
         title: 'Internal Server Error',
         status: 500,
         detail: 'Database crash',

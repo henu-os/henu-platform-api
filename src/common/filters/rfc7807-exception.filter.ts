@@ -67,8 +67,12 @@ export class Rfc7807ExceptionFilter implements ExceptionFilter {
       this.logger.error(`Unknown non-error exception at ${instance}: ${JSON.stringify(exception)}`);
     }
 
+    const errorBaseUrl =
+      process.env.API_BASE_URL || 'https://henu-platform-api.onrender.com';
+    const cleanBaseUrl = errorBaseUrl.replace(/\/+$/, '');
+
     const problemDetails: ProblemDetails = {
-      type: `https://api.henuos.com/errors/${code.toLowerCase().replace(/_/g, '-')}`,
+      type: `${cleanBaseUrl}/errors/${code.toLowerCase().replace(/_/g, '-')}`,
       title,
       status,
       detail,
